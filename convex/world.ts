@@ -111,30 +111,54 @@ export const userStatus = query({
 export const joinWorld = mutation({
   args: {
     worldId: v.id('worlds'),
+    name: v.optional(v.string()),
+    character: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    // const identity = await ctx.auth.getUserIdentity();
-    // if (!identity) {
-    //   throw new ConvexError(`Not logged in`);
-    // }
-    // const name =
-    //   identity.givenName || identity.nickname || (identity.email && identity.email.split('@')[0]);
-    const name = DEFAULT_NAME;
+    const name = args.name || DEFAULT_NAME;
+    const character = args.character || characters[Math.floor(Math.random() * characters.length)].name;
 
-    // if (!name) {
-    //   throw new ConvexError(`Missing name on ${JSON.stringify(identity)}`);
-    // }
     const world = await ctx.db.get(args.worldId);
     if (!world) {
       throw new ConvexError(`Invalid world ID: ${args.worldId}`);
     }
-    // const { tokenIdentifier } = identity;
     return await insertInput(ctx, world._id, 'join', {
       name,
-      character: characters[Math.floor(Math.random() * characters.length)].name,
-      description: `${DEFAULT_NAME} is a human player`,
-      // description: `${identity.givenName} is a human player`,
+      character,
+      description: `${name} is a human player`,
       tokenIdentifier: DEFAULT_NAME,
+    });
+  },
+});
+
+export const createAgent = mutation({
+  args: {
+    worldId: v.id('worlds'),
+    name: v.string(),
+    character: v.string(),
+    identity: v.string(),
+    plan: v.string(),
+    type: v.optional(v.string()),
+    webhookUrl: v.optional(v.string()),
+    webhookAuthToken: v.optional(v.string()),
+    anthropicApiKey: v.optional(v.string()),
+    managedAgentId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const world = await ctx.db.get(args.worldId);
+    if (!world) {
+      throw new Error(`Invalid world ID: ${args.worldId}`);
+    }
+    return await insertInput(ctx, world._id, 'createCustomAgent', {
+      name: args.name,
+      character: args.character,
+      identity: args.identity,
+      plan: args.plan,
+      type: args.type,
+      webhookUrl: args.webhookUrl,
+      webhookAuthToken: args.webhookAuthToken,
+      anthropicApiKey: args.anthropicApiKey,
+      managedAgentId: args.managedAgentId,
     });
   },
 });

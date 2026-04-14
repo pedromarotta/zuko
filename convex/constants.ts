@@ -62,7 +62,7 @@ export const AGENT_WAKEUP_THRESHOLD = 1000;
 export const VACUUM_MAX_AGE = 2 * 7 * 24 * 60 * 60 * 1000;
 export const DELETE_BATCH_SIZE = 64;
 
-export const HUMAN_IDLE_TOO_LONG = 5 * 60 * 1000;
+export const HUMAN_IDLE_TOO_LONG = 30 * 60 * 1000; // 30 min for demo
 
 export const ACTIVITIES = [
   { description: 'reading a book', emoji: '📖', duration: 60_000 },
@@ -71,6 +71,10 @@ export const ACTIVITIES = [
 ];
 
 export const ENGINE_ACTION_DURATION = 30000;
+
+// Task choreography (agent-as-coworker)
+export const TASK_ACTIVITY_DURATION = 3000;
+export const TASK_MAX_MESSAGES = 2;
 
 // Bound the number of pathfinding searches we do per game step.
 export const MAX_PATHFINDS_PER_STEP = 16;

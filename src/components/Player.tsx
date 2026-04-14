@@ -29,7 +29,8 @@ export const Player = ({
   onClick: SelectElement;
   historicalTime?: number;
 }) => {
-  const playerCharacter = game.playerDescriptions.get(player.id)?.character;
+  const playerDescription = game.playerDescriptions.get(player.id);
+  const playerCharacter = playerDescription?.character;
   if (!playerCharacter) {
     throw new Error(`Player ${player.id} has no character`);
   }
@@ -62,6 +63,11 @@ export const Player = ({
     !![...game.world.agents.values()].find(
       (a) => a.playerId === player.id && !!a.inProgressOperation,
     );
+
+  // Check if this player is an agent (has an agent entry)
+  const isAgent = !![...game.world.agents.values()].find((a) => a.playerId === player.id);
+  const playerName = playerDescription?.name || '';
+
   const tileDim = game.worldMap.tileDim;
   const historicalFacing = { dx: historicalLocation.dx, dy: historicalLocation.dy };
   return (
@@ -79,6 +85,8 @@ export const Player = ({
             : undefined
         }
         isViewer={isViewer}
+        isAgent={isAgent}
+        name={playerName}
         textureUrl={character.textureUrl}
         spritesheetData={character.spritesheetData}
         speed={character.speed}

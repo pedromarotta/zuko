@@ -14,26 +14,23 @@ export const Character = ({
   isSpeaking = false,
   emoji = '',
   isViewer = false,
+  isAgent = false,
+  name = '',
   speed = 0.1,
   onClick,
 }: {
-  // Path to the texture packed image.
   textureUrl: string;
-  // The data for the spritesheet.
   spritesheetData: ISpritesheetData;
-  // The pose of the NPC.
   x: number;
   y: number;
   orientation: number;
   isMoving?: boolean;
-  // Shows a thought bubble if true.
   isThinking?: boolean;
-  // Shows a speech bubble if true.
   isSpeaking?: boolean;
   emoji?: string;
-  // Highlights the player.
   isViewer?: boolean;
-  // The speed of the animation. Can be tuned depending on the side and speed of the NPC.
+  isAgent?: boolean;
+  name?: string;
   speed?: number;
   onClick: () => void;
 }) => {
@@ -52,12 +49,9 @@ export const Character = ({
     void parseSheet();
   }, []);
 
-  // The first "left" is "right" but reflected.
   const roundedOrientation = Math.floor(orientation / 90);
   const direction = ['right', 'down', 'left', 'up'][roundedOrientation];
 
-  // Prevents the animation from stopping when the texture changes
-  // (see https://github.com/pixijs/pixi-react/issues/359)
   const ref = useRef<PIXI.AnimatedSprite | null>(null);
   useEffect(() => {
     if (isMoving) {
@@ -67,30 +61,38 @@ export const Character = ({
 
   if (!spriteSheet) return null;
 
-  let blockOffset = { x: 0, y: 0 };
-  switch (roundedOrientation) {
-    case 2:
-      blockOffset = { x: -20, y: 0 };
-      break;
-    case 0:
-      blockOffset = { x: 20, y: 0 };
-      break;
-    case 3:
-      blockOffset = { x: 0, y: -20 };
-      break;
-    case 1:
-      blockOffset = { x: 0, y: 20 };
-      break;
-  }
-
   return (
     <Container x={x} y={y} interactive={true} pointerdown={onClick} cursor="pointer">
+      {/* Name label above avatar */}
+      {name && (
+        <>
+          <NameBackground name={name} isAgent={isAgent} />
+          <Text
+            x={0}
+            y={-22}
+            text={name}
+            anchor={{ x: 0.5, y: 0.5 }}
+            style={
+              new PIXI.TextStyle({
+                fontFamily: 'Arial, sans-serif',
+                fontSize: 11,
+                fontWeight: 'bold',
+                fill: '#ffffff',
+                dropShadow: true,
+                dropShadowColor: '#000000',
+                dropShadowBlur: 2,
+                dropShadowDistance: 0,
+              })
+            }
+          />
+          {/* Status dot */}
+          <StatusDot x={-(name.length * 3 + 8)} y={-22} isAgent={isAgent} />
+        </>
+      )}
       {isThinking && (
-        // TODO: We'll eventually have separate assets for thinking and speech animations.
         <Text x={-20} y={-10} scale={{ x: -0.8, y: 0.8 }} text={'💭'} anchor={{ x: 0.5, y: 0.5 }} />
       )}
       {isSpeaking && (
-        // TODO: We'll eventually have separate assets for thinking and speech animations.
         <Text x={18} y={-10} scale={0.8} text={'💬'} anchor={{ x: 0.5, y: 0.5 }} />
       )}
       {isViewer && <ViewerIndicator />}
@@ -107,6 +109,33 @@ export const Character = ({
     </Container>
   );
 };
+
+function NameBackground({ name, isAgent }: { name: string; isAgent: boolean }) {
+  const draw = useCallback(
+    (g: PIXI.Graphics) => {
+      g.clear();
+      const width = name.length * 6.5 + 20;
+      g.beginFill(isAgent ? 0x1a1d2e : 0x000000, 0.6);
+      g.drawRoundedRect(-width / 2, -30, width, 16, 4);
+      g.endFill();
+    },
+    [name, isAgent],
+  );
+  return <Graphics draw={draw} />;
+}
+
+function StatusDot({ x, y, isAgent }: { x: number; y: number; isAgent: boolean }) {
+  const draw = useCallback(
+    (g: PIXI.Graphics) => {
+      g.clear();
+      g.beginFill(isAgent ? 0x818cf8 : 0x4ade80);
+      g.drawCircle(x, y, 3);
+      g.endFill();
+    },
+    [x, y, isAgent],
+  );
+  return <Graphics draw={draw} />;
+}
 
 function ViewerIndicator() {
   const draw = useCallback((g: PIXI.Graphics) => {

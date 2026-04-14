@@ -3,7 +3,9 @@
 const OPENAI_EMBEDDING_DIMENSION = 1536;
 const TOGETHER_EMBEDDING_DIMENSION = 768;
 const OLLAMA_EMBEDDING_DIMENSION = 1024;
+const ANTHROPIC_EMBEDDING_DIMENSION = 1024; // Local simple embeddings
 
+// Both Anthropic (local) and Ollama use 1024
 export const EMBEDDING_DIMENSION: number = OLLAMA_EMBEDDING_DIMENSION;
 
 export function detectMismatchedLLMProvider() {
@@ -35,7 +37,7 @@ export function detectMismatchedLLMProvider() {
 }
 
 export interface LLMConfig {
-  provider: 'openai' | 'together' | 'ollama' | 'custom';
+  provider: 'openai' | 'together' | 'ollama' | 'custom' | 'anthropic';
   url: string; // Should not have a trailing slash
   chatModel: string;
   embeddingModel: string;
@@ -45,6 +47,16 @@ export interface LLMConfig {
 
 export function getLLMConfig(): LLMConfig {
   let provider = process.env.LLM_PROVIDER;
+  if (provider ? provider === 'anthropic' : process.env.ANTHROPIC_API_KEY) {
+    return {
+      provider: 'anthropic',
+      url: 'https://api.anthropic.com',
+      chatModel: process.env.ANTHROPIC_CHAT_MODEL ?? 'claude-haiku-4-5',
+      embeddingModel: 'local', // We use simple local embeddings
+      stopWords: [],
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    };
+  }
   if (provider ? provider === 'openai' : process.env.OPENAI_API_KEY) {
     if (EMBEDDING_DIMENSION !== OPENAI_EMBEDDING_DIMENSION) {
       throw new Error('EMBEDDING_DIMENSION must be 1536 for OpenAI');
@@ -142,6 +154,11 @@ export async function chatCompletion(
   const stopWords = body.stop ? (typeof body.stop === 'string' ? [body.stop] : body.stop) : [];
   if (config.stopWords) stopWords.push(...config.stopWords);
   console.log(body);
+
+  if (config.provider === 'anthropic') {
+    return anthropicChatCompletion(body, config, stopWords);
+  }
+
   const {
     result: content,
     retries,
@@ -187,6 +204,73 @@ export async function chatCompletion(
   };
 }
 
+async function anthropicChatCompletion(
+  body: Omit<CreateChatCompletionRequest, 'model'> & { model?: string },
+  config: LLMConfig,
+  stopWords: string[],
+) {
+  // Convert OpenAI-format messages to Anthropic format
+  const systemMessages = body.messages.filter((m) => m.role === 'system');
+  const systemPrompt = systemMessages.map((m) => m.content).join('\n');
+  const messages = body.messages
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content ?? '',
+    }));
+
+  // Ensure messages alternate and start with user
+  if (messages.length === 0 || messages[0].role !== 'user') {
+    messages.unshift({ role: 'user', content: 'Hello.' });
+  }
+
+  const {
+    result: content,
+    retries,
+    ms,
+  } = await retryWithBackoff(async () => {
+    const result = await fetch(config.url + '/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: body.model,
+        max_tokens: body.max_tokens ?? 1024,
+        system: systemPrompt || undefined,
+        messages,
+      }),
+    });
+    if (!result.ok) {
+      const error = await result.text();
+      console.error({ error });
+      throw {
+        retry: result.status === 429 || result.status >= 500,
+        error: new Error(`Anthropic chat failed with code ${result.status}: ${error}`),
+      };
+    }
+    const json = (await result.json()) as {
+      content: { type: string; text: string }[];
+    };
+    const text = json.content
+      .filter((b: { type: string }) => b.type === 'text')
+      .map((b: { text: string }) => b.text)
+      .join('');
+    // Apply stop words
+    let finalText = text;
+    for (const sw of stopWords) {
+      const idx = finalText.indexOf(sw);
+      if (idx >= 0) finalText = finalText.substring(0, idx);
+    }
+    console.log(finalText);
+    return finalText;
+  });
+
+  return { content, retries, ms };
+}
+
 export async function tryPullOllama(model: string, error: string) {
   if (error.includes('try pulling')) {
     console.error('Embedding model not found, pulling from Ollama');
@@ -202,8 +286,37 @@ export async function tryPullOllama(model: string, error: string) {
   }
 }
 
+// Simple local embeddings using hash-based approach. Not production quality,
+// but sufficient for demo proximity/memory matching.
+function simpleLocalEmbedding(text: string, dimension: number): number[] {
+  const embedding = new Array(dimension).fill(0);
+  const words = text.toLowerCase().split(/\s+/);
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    for (let j = 0; j < word.length; j++) {
+      const idx = (word.charCodeAt(j) * 31 + j * 17 + i * 13) % dimension;
+      embedding[idx] += 1.0 / words.length;
+    }
+  }
+  // Normalize
+  const norm = Math.sqrt(embedding.reduce((sum, v) => sum + v * v, 0));
+  if (norm > 0) {
+    for (let i = 0; i < embedding.length; i++) embedding[i] /= norm;
+  }
+  return embedding;
+}
+
 export async function fetchEmbeddingBatch(texts: string[]) {
   const config = getLLMConfig();
+  if (config.provider === 'anthropic') {
+    return {
+      ollama: false as const,
+      embeddings: texts.map((t) => simpleLocalEmbedding(t, ANTHROPIC_EMBEDDING_DIMENSION)),
+      usage: 0,
+      retries: 0,
+      ms: 0,
+    };
+  }
   if (config.provider === 'ollama') {
     return {
       ollama: true as const,

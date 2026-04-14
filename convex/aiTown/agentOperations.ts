@@ -55,6 +55,111 @@ export const agentGenerateMessage = internalAction({
     messageUuid: v.string(),
   },
   handler: async (ctx, args) => {
+    // Load agent data to check for task state
+    const promptData = await ctx.runQuery(internal.agent.conversation.queryPromptData, {
+      worldId: args.worldId,
+      playerId: args.playerId,
+      otherPlayerId: args.otherPlayerId,
+      conversationId: args.conversationId,
+    });
+    const agent = promptData.agent;
+    const otherPlayer = promptData.otherPlayer;
+    const otherAgent = promptData.otherAgent;
+
+    // Clean up stale tasks from old code (invalid phases or missing requester)
+    const validPhases = ['working', 'consulting', 'reporting', 'followup'];
+    if (agent.activeTask && !validPhases.includes(agent.activeTask.phase)) {
+      console.log(`[task] Clearing stale task with invalid phase: ${agent.activeTask.phase}`);
+      agent.activeTask = undefined;
+    }
+
+    // === SCRIPTED: Josh gives hardcoded reply when Ada consults him ===
+    if (otherAgent?.activeTask?.phase === 'consulting' && args.type === 'continue') {
+      console.log(`[task] Josh (${args.playerId}) giving scripted reply to Ada`);
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "FIFO is correct for the €5,100. Other two are straightforward adjustments.",
+        messageUuid: args.messageUuid,
+        leaveConversation: false,
+        operationId: args.operationId,
+      });
+      return;
+    }
+
+    // === SCRIPTED TASK: consulting phase — Ada asks, Josh replies, Ada leaves ===
+    if (agent.activeTask?.phase === 'consulting' && args.type === 'continue') {
+      console.log(`[task] ${args.playerId} got reply from Josh, leaving with thanks`);
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "Got it, thanks!",
+        messageUuid: args.messageUuid,
+        leaveConversation: true,
+        operationId: args.operationId,
+      });
+      return;
+    }
+
+    // === SCRIPTED TASK: reporting phase — Ada delivers hardcoded report, advance to followup ===
+    if (agent.activeTask?.phase === 'reporting' && args.type === 'start') {
+      console.log(`[task] ${args.playerId} delivering report, advancing to followup`);
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "Done. Adjusted all 3 logs in ERP — FIFO for €5,100 per Josh, standard for the rest. Country manager notified via email.",
+        messageUuid: args.messageUuid,
+        leaveConversation: false,
+        operationId: args.operationId,
+        startTask: {
+          requesterId: agent.activeTask.requesterId,
+          phase: 'followup',
+          consultTarget: agent.activeTask.consultTarget,
+          gatheredInfo: agent.activeTask.gatheredInfo,
+        },
+      });
+      return;
+    }
+
+    // === SCRIPTED TASK: followup — human asks something else, Ada confirms ===
+    if (agent.activeTask?.phase === 'followup' && args.type === 'continue') {
+      console.log(`[task] ${args.playerId} handling follow-up`);
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "Meeting set for tomorrow 5 PM. Calendar invite and Slack link sent. ✅",
+        messageUuid: args.messageUuid,
+        leaveConversation: false,
+        operationId: args.operationId,
+      });
+      return;
+    }
+
+    // === SCRIPTED TASK: consulting start — Ada asks Josh the question ===
+    if (agent.activeTask?.phase === 'consulting' && args.type === 'start') {
+      console.log(`[task] ${args.playerId} asking Josh about ERP adjustment`);
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "Found 3 pending logs — €2,400, €890, €5,100. FIFO for the cross-quarter one?",
+        messageUuid: args.messageUuid,
+        leaveConversation: false,
+        operationId: args.operationId,
+      });
+      return;
+    }
+
+    // === NORMAL (non-task) message generation ===
     let completionFn;
     switch (args.type) {
       case 'start':
@@ -77,15 +182,31 @@ export const agentGenerateMessage = internalAction({
       args.otherPlayerId as GameId<'players'>,
     );
 
+    // === TASK TRIGGER: human talks to managed agent → start task ===
+    let startTask = undefined;
+    const isHuman = !!otherPlayer.human;
+    const isManagedAgent = agent.type === 'managed';
+    const hasNoTask = !agent.activeTask;
+
+    if (args.type === 'continue' && isHuman && isManagedAgent && hasNoTask) {
+      console.log(`[task] Triggering task for ${args.playerId}`);
+      startTask = {
+        requesterId: args.otherPlayerId,
+        phase: 'working' as const,
+        gatheredInfo: '',
+      };
+    }
+
     await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
       worldId: args.worldId,
       conversationId: args.conversationId,
       agentId: args.agentId,
       playerId: args.playerId,
-      text,
+      text: startTask ? "On it! Checking the ERP and looping in Josh." : text,
       messageUuid: args.messageUuid,
-      leaveConversation: args.type === 'leave',
+      leaveConversation: args.type === 'leave' || !!startTask,
       operationId: args.operationId,
+      startTask,
     });
   },
 });

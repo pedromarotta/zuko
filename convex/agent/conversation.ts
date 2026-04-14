@@ -7,6 +7,8 @@ import { api, internal } from '../_generated/api';
 import * as embeddingsCache from './embeddingsCache';
 import { GameId, conversationId, playerId } from '../aiTown/ids';
 import { NUM_MEMORIES_TO_SEARCH } from '../constants';
+import { callWebhook, WebhookContext } from './webhook';
+import { callManagedAgent, ManagedAgentContext } from './managedAgent';
 
 const selfInternal = internal.agent.conversation;
 
@@ -26,6 +28,34 @@ export async function startConversationMessage(
       conversationId,
     },
   );
+
+  console.log(`[routing] Agent type=${agent.type}, hasApiKey=${!!agent.anthropicApiKey}, hasManagedId=${!!agent.managedAgentId}, player=${player.name}`);
+
+  // --- Webhook agent: delegate to external brain ---
+  if (agent.type === 'webhook' && agent.webhookUrl) {
+    return callWebhook(agent.webhookUrl, {
+      type: 'start',
+      agent: { name: player.name, identity: agent.identity, plan: agent.plan },
+      otherPlayer: { name: otherPlayer.name },
+      conversationHistory: [],
+      memories: [],
+    }, agent.webhookAuthToken);
+  }
+
+  // --- Managed Agent: delegate to Anthropic Managed Agents ---
+  if (agent.type === 'managed' && agent.managedAgentId) {
+    const apiKey = process.env.ANTHROPIC_API_KEY || agent.anthropicApiKey;
+    if (!apiKey) throw new Error('No API key for managed agent');
+    return callManagedAgent(apiKey, agent.managedAgentId, {
+      type: 'start',
+      agentName: player.name,
+      otherPlayerName: otherPlayer.name,
+      message: '',
+      conversationHistory: [],
+    });
+  }
+
+  // --- Builtin agent: existing Claude flow ---
   const embedding = await embeddingsCache.fetch(
     ctx,
     `${player.name} is talking to ${otherPlayer.name}`,
@@ -91,6 +121,43 @@ export async function continueConversationMessage(
       conversationId,
     },
   );
+
+  // Build message history (shared by both paths)
+  const prevMessages = await ctx.runQuery(api.messages.listMessages, {
+    worldId,
+    conversationId: conversation.id as GameId<'conversations'>,
+  });
+  const history = prevMessages.map((m: any) => ({
+    author: m.author === player.id ? player.name : otherPlayer.name,
+    text: m.text,
+  }));
+
+  // --- Webhook agent ---
+  if (agent.type === 'webhook' && agent.webhookUrl) {
+    return callWebhook(agent.webhookUrl, {
+      type: 'continue',
+      agent: { name: player.name, identity: agent.identity, plan: agent.plan },
+      otherPlayer: { name: otherPlayer.name },
+      conversationHistory: history,
+      memories: [],
+    }, agent.webhookAuthToken);
+  }
+
+  // --- Managed Agent ---
+  if (agent.type === 'managed' && agent.managedAgentId) {
+    const apiKey = process.env.ANTHROPIC_API_KEY || agent.anthropicApiKey;
+    if (!apiKey) throw new Error('No API key for managed agent');
+    const lastMessage = history.length > 0 ? history[history.length - 1].text : '';
+    return callManagedAgent(apiKey, agent.managedAgentId, {
+      type: 'continue',
+      agentName: player.name,
+      otherPlayerName: otherPlayer.name,
+      message: lastMessage,
+      conversationHistory: history,
+    });
+  }
+
+  // --- Builtin agent ---
   const now = Date.now();
   const started = new Date(conversation.created);
   const embedding = await embeddingsCache.fetch(
@@ -114,13 +181,10 @@ export async function continueConversationMessage(
       role: 'system',
       content: prompt.join('\n'),
     },
-    ...(await previousMessages(
-      ctx,
-      worldId,
-      player,
-      otherPlayer,
-      conversation.id as GameId<'conversations'>,
-    )),
+    ...prevMessages.map((m: any) => ({
+      role: 'user' as const,
+      content: `${m.author === player.id ? player.name : otherPlayer.name} to ${m.author === player.id ? otherPlayer.name : player.name}: ${m.text}`,
+    })),
   ];
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
@@ -149,6 +213,42 @@ export async function leaveConversationMessage(
       conversationId,
     },
   );
+
+  // Build message history
+  const prevMessages = await ctx.runQuery(api.messages.listMessages, {
+    worldId,
+    conversationId: conversation.id as GameId<'conversations'>,
+  });
+  const history = prevMessages.map((m: any) => ({
+    author: m.author === player.id ? player.name : otherPlayer.name,
+    text: m.text,
+  }));
+
+  // --- Webhook agent ---
+  if (agent.type === 'webhook' && agent.webhookUrl) {
+    return callWebhook(agent.webhookUrl, {
+      type: 'leave',
+      agent: { name: player.name, identity: agent.identity, plan: agent.plan },
+      otherPlayer: { name: otherPlayer.name },
+      conversationHistory: history,
+      memories: [],
+    }, agent.webhookAuthToken);
+  }
+
+  // --- Managed Agent ---
+  if (agent.type === 'managed' && agent.managedAgentId) {
+    const apiKey = process.env.ANTHROPIC_API_KEY || agent.anthropicApiKey;
+    if (!apiKey) throw new Error('No API key for managed agent');
+    return callManagedAgent(apiKey, agent.managedAgentId, {
+      type: 'leave',
+      agentName: player.name,
+      otherPlayerName: otherPlayer.name,
+      message: '',
+      conversationHistory: history,
+    });
+  }
+
+  // --- Builtin agent ---
   const prompt = [
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `You've decided to leave the question and would like to politely tell them you're leaving the conversation.`,
@@ -163,13 +263,10 @@ export async function leaveConversationMessage(
       role: 'system',
       content: prompt.join('\n'),
     },
-    ...(await previousMessages(
-      ctx,
-      worldId,
-      player,
-      otherPlayer,
-      conversation.id as GameId<'conversations'>,
-    )),
+    ...prevMessages.map((m: any) => ({
+      role: 'user' as const,
+      content: `${m.author === player.id ? player.name : otherPlayer.name} to ${m.author === player.id ? otherPlayer.name : player.name}: ${m.text}`,
+    })),
   ];
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
@@ -224,26 +321,6 @@ function relatedMemoriesPrompt(memories: memory.Memory[]): string[] {
     }
   }
   return prompt;
-}
-
-async function previousMessages(
-  ctx: ActionCtx,
-  worldId: Id<'worlds'>,
-  player: { id: string; name: string },
-  otherPlayer: { id: string; name: string },
-  conversationId: GameId<'conversations'>,
-) {
-  const llmMessages: LLMMessage[] = [];
-  const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
-  for (const message of prevMessages) {
-    const author = message.author === player.id ? player : otherPlayer;
-    const recipient = message.author === player.id ? otherPlayer : player;
-    llmMessages.push({
-      role: 'user',
-      content: `${author.name} to ${recipient.name}: ${message.text}`,
-    });
-  }
-  return llmMessages;
 }
 
 export const queryPromptData = internalQuery({
@@ -314,7 +391,6 @@ export const queryPromptData = internalQuery({
           .eq('player1', args.playerId)
           .eq('player2', args.otherPlayerId),
       )
-      // Order by conversation end time descending.
       .order('desc')
       .first();
 
@@ -334,7 +410,16 @@ export const queryPromptData = internalQuery({
       player: { name: playerDescription.name, ...player },
       otherPlayer: { name: otherPlayerDescription.name, ...otherPlayer },
       conversation,
-      agent: { identity: agentDescription.identity, plan: agentDescription.plan, ...agent },
+      agent: {
+        identity: agentDescription.identity,
+        plan: agentDescription.plan,
+        type: agentDescription.type || 'builtin',
+        webhookUrl: agentDescription.webhookUrl,
+        webhookAuthToken: agentDescription.webhookAuthToken,
+        anthropicApiKey: agentDescription.anthropicApiKey,
+        managedAgentId: agentDescription.managedAgentId,
+        ...agent,
+      },
       otherAgent: otherAgent && {
         identity: otherAgentDescription!.identity,
         plan: otherAgentDescription!.plan,
@@ -346,7 +431,6 @@ export const queryPromptData = internalQuery({
 });
 
 function stopWords(otherPlayer: string, player: string) {
-  // These are the words we ask the LLM to stop on. OpenAI only supports 4.
   const variants = [`${otherPlayer} to ${player}`];
   return variants.flatMap((stop) => [stop + ':', stop.toLowerCase() + ':']);
 }

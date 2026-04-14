@@ -7,7 +7,7 @@ import { inputHandler } from './inputHandler';
 import { point } from '../util/types';
 import { Descriptions } from '../../data/characters';
 import { AgentDescription } from './agentDescription';
-import { Agent } from './agent';
+import { Agent, serializedActiveTask } from './agent';
 
 export const agentInputs = {
   finishRememberConversation: inputHandler({
@@ -81,6 +81,7 @@ export const agentInputs = {
       timestamp: v.number(),
       operationId: v.string(),
       leaveConversation: v.boolean(),
+      startTask: v.optional(serializedActiveTask),
     },
     handler: (game, now, args) => {
       const agentId = parseGameId('agents', args.agentId);
@@ -112,6 +113,10 @@ export const agentInputs = {
       });
       if (args.leaveConversation) {
         conversation.leave(game, now, player);
+      }
+      if (args.startTask) {
+        console.log(`[task] Agent ${agentId} starting task, phase: ${args.startTask.phase}`);
+        agent.activeTask = args.startTask;
       }
       return null;
     },
@@ -147,6 +152,54 @@ export const agentInputs = {
           agentId: agentId,
           identity: description.identity,
           plan: description.plan,
+        }),
+      );
+      return { agentId };
+    },
+  }),
+  createCustomAgent: inputHandler({
+    args: {
+      name: v.string(),
+      character: v.string(),
+      identity: v.string(),
+      plan: v.string(),
+      type: v.optional(v.string()),
+      webhookUrl: v.optional(v.string()),
+      webhookAuthToken: v.optional(v.string()),
+      anthropicApiKey: v.optional(v.string()),
+      managedAgentId: v.optional(v.string()),
+    },
+    handler: (game, now, args) => {
+      const playerId = Player.join(
+        game,
+        now,
+        args.name,
+        args.character,
+        args.identity,
+      );
+      const agentId = game.allocId('agents');
+      game.world.agents.set(
+        agentId,
+        new Agent({
+          id: agentId,
+          playerId: playerId,
+          inProgressOperation: undefined,
+          lastConversation: undefined,
+          lastInviteAttempt: undefined,
+          toRemember: undefined,
+        }),
+      );
+      game.agentDescriptions.set(
+        agentId,
+        new AgentDescription({
+          agentId: agentId,
+          identity: args.identity,
+          plan: args.plan,
+          type: args.type,
+          webhookUrl: args.webhookUrl,
+          webhookAuthToken: args.webhookAuthToken,
+          anthropicApiKey: args.anthropicApiKey,
+          managedAgentId: args.managedAgentId,
         }),
       );
       return { agentId };

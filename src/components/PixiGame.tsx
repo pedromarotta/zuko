@@ -82,7 +82,7 @@ export const PixiGame = (props: {
   const { width, height, tileDim } = props.game.worldMap;
   const players = [...props.game.world.players.values()];
 
-  // Zoom on the user’s avatar when it is created
+  // Zoom on the user's avatar when it is created
   useEffect(() => {
     if (!viewportRef.current || humanPlayerId === undefined) return;
 
@@ -92,6 +92,97 @@ export const PixiGame = (props: {
       scale: 1.5,
     });
   }, [humanPlayerId]);
+
+  // Arrow key / WASD movement — sends destination ahead in pressed direction
+  // so the pathfinding system creates a smooth interpolated path.
+  const keysDown = useRef(new Set<string>());
+  const moveRafId = useRef<number | null>(null);
+  const lastMoveSent = useRef(0);
+
+  useEffect(() => {
+    if (!humanPlayerId) return;
+
+    const dirMap: Record<string, { dx: number; dy: number }> = {
+      ArrowUp: { dx: 0, dy: -1 },
+      ArrowDown: { dx: 0, dy: 1 },
+      ArrowLeft: { dx: -1, dy: 0 },
+      ArrowRight: { dx: 1, dy: 0 },
+      w: { dx: 0, dy: -1 },
+      s: { dx: 0, dy: 1 },
+      a: { dx: -1, dy: 0 },
+      d: { dx: 1, dy: 0 },
+    };
+
+    const LOOK_AHEAD = 2; // tiles ahead to target for smooth paths
+    const MOVE_THROTTLE = 200; // ms between moveTo sends
+
+    const tick = () => {
+      moveRafId.current = null;
+      if (keysDown.current.size === 0) return;
+
+      const now = Date.now();
+      if (now - lastMoveSent.current < MOVE_THROTTLE) {
+        moveRafId.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const player = props.game.world.players.get(humanPlayerId);
+      if (!player) {
+        moveRafId.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // Use the latest pressed key for direction (like Gather)
+      let latestDir: { dx: number; dy: number } | null = null;
+      for (const key of keysDown.current) {
+        if (dirMap[key]) latestDir = dirMap[key];
+      }
+      if (!latestDir) {
+        moveRafId.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      const dest = {
+        x: Math.max(0, Math.min(width - 1, Math.floor(player.position.x) + latestDir.dx * LOOK_AHEAD)),
+        y: Math.max(0, Math.min(height - 1, Math.floor(player.position.y) + latestDir.dy * LOOK_AHEAD)),
+      };
+
+      lastMoveSent.current = now;
+      void toastOnError(moveTo({ playerId: humanPlayerId, destination: dest }));
+
+      moveRafId.current = requestAnimationFrame(tick);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!dirMap[e.key]) return;
+      e.preventDefault();
+      keysDown.current.add(e.key);
+      if (!moveRafId.current) {
+        lastMoveSent.current = 0; // allow immediate first move
+        moveRafId.current = requestAnimationFrame(tick);
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      keysDown.current.delete(e.key);
+      if (keysDown.current.size === 0 && moveRafId.current) {
+        cancelAnimationFrame(moveRafId.current);
+        moveRafId.current = null;
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      if (moveRafId.current) {
+        cancelAnimationFrame(moveRafId.current);
+        moveRafId.current = null;
+      }
+    };
+  }, [humanPlayerId, props.game, moveTo, width, height, tileDim]);
 
   return (
     <PixiViewport
