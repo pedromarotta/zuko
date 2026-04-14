@@ -141,7 +141,7 @@ export const agentGenerateMessage = internalAction({
         playerId: args.playerId,
         text: "Meeting set for tomorrow 5 PM. Calendar invite and Slack link sent. ✅",
         messageUuid: args.messageUuid,
-        leaveConversation: false,
+        leaveConversation: true,
         operationId: args.operationId,
       });
       return;
