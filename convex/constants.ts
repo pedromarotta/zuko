@@ -18,8 +18,8 @@ export const COLLISION_THRESHOLD = 0.75;
 // How many human players can be in a world at once.
 export const MAX_HUMAN_PLAYERS = 8;
 
-// Don't talk to anyone for 15s after having a conversation.
-export const CONVERSATION_COOLDOWN = 15000;
+// Don't talk to anyone for 2s after having a conversation (fast for demo).
+export const CONVERSATION_COOLDOWN = 2000;
 
 // Don't do another activity for 10s after doing one.
 export const ACTIVITY_COOLDOWN = 10_000;
@@ -34,8 +34,7 @@ export const INVITE_ACCEPT_PROBABILITY = 0.8;
 export const INVITE_TIMEOUT = 60000;
 
 // Wait for another player to say something before jumping in.
-export const AWKWARD_CONVERSATION_TIMEOUT = 60_000; // more time locally
-// export const AWKWARD_CONVERSATION_TIMEOUT = 20_000;
+export const AWKWARD_CONVERSATION_TIMEOUT = 3_000; // fast for demo
 
 // Leave a conversation after participating too long.
 export const MAX_CONVERSATION_DURATION = 10 * 60_000; // more time locally
@@ -52,8 +51,8 @@ export const INPUT_DELAY = 1000;
 // This is over-fetched by 10x so we can prioritize memories by more than relevance.
 export const NUM_MEMORIES_TO_SEARCH = 3;
 
-// Wait for at least two seconds before sending another message.
-export const MESSAGE_COOLDOWN = 2000;
+// Wait before sending another message.
+export const MESSAGE_COOLDOWN = 1000;
 
 // Don't run a turn of the agent more than once a second.
 export const AGENT_WAKEUP_THRESHOLD = 1000;
@@ -73,7 +72,7 @@ export const ACTIVITIES = [
 export const ENGINE_ACTION_DURATION = 30000;
 
 // Task choreography (agent-as-coworker)
-export const TASK_ACTIVITY_DURATION = 3000;
+export const TASK_ACTIVITY_DURATION = 1500; // 1.5s — fast for demo
 export const TASK_MAX_MESSAGES = 2;
 
 // Bound the number of pathfinding searches we do per game step.

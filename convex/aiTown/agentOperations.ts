@@ -159,7 +159,47 @@ export const agentGenerateMessage = internalAction({
       return;
     }
 
-    // === NORMAL (non-task) message generation ===
+    // === TASK TRIGGER: human talks to managed agent → start task (NO LLM call) ===
+    const isHuman = !!otherPlayer.human;
+    const isManagedAgent = agent.type === 'managed';
+    const hasNoTask = !agent.activeTask;
+
+    if (args.type === 'continue' && isHuman && isManagedAgent && hasNoTask) {
+      console.log(`[task] Triggering task for ${args.playerId}`);
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "On it! Checking the ERP and looping in Josh.",
+        messageUuid: args.messageUuid,
+        leaveConversation: true,
+        operationId: args.operationId,
+        startTask: {
+          requesterId: args.otherPlayerId,
+          phase: 'working' as const,
+          gatheredInfo: '',
+        },
+      });
+      return;
+    }
+
+    // === Managed agent talking to human (no task) — hardcoded greeting, NO LLM ===
+    if (isManagedAgent && isHuman && args.type === 'start') {
+      await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+        worldId: args.worldId,
+        conversationId: args.conversationId,
+        agentId: args.agentId,
+        playerId: args.playerId,
+        text: "Hey! What can I help you with?",
+        messageUuid: args.messageUuid,
+        leaveConversation: false,
+        operationId: args.operationId,
+      });
+      return;
+    }
+
+    // === NORMAL (non-task) message generation — only for builtin agents ===
     let completionFn;
     switch (args.type) {
       case 'start':
@@ -182,31 +222,15 @@ export const agentGenerateMessage = internalAction({
       args.otherPlayerId as GameId<'players'>,
     );
 
-    // === TASK TRIGGER: human talks to managed agent → start task ===
-    let startTask = undefined;
-    const isHuman = !!otherPlayer.human;
-    const isManagedAgent = agent.type === 'managed';
-    const hasNoTask = !agent.activeTask;
-
-    if (args.type === 'continue' && isHuman && isManagedAgent && hasNoTask) {
-      console.log(`[task] Triggering task for ${args.playerId}`);
-      startTask = {
-        requesterId: args.otherPlayerId,
-        phase: 'working' as const,
-        gatheredInfo: '',
-      };
-    }
-
     await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
       worldId: args.worldId,
       conversationId: args.conversationId,
       agentId: args.agentId,
       playerId: args.playerId,
-      text: startTask ? "On it! Checking the ERP and looping in Josh." : text,
+      text,
       messageUuid: args.messageUuid,
-      leaveConversation: args.type === 'leave' || !!startTask,
+      leaveConversation: args.type === 'leave',
       operationId: args.operationId,
-      startTask,
     });
   },
 });

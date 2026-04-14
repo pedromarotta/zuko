@@ -188,16 +188,44 @@ export class Player {
       }
     }
     let position;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const candidate = {
-        x: Math.floor(Math.random() * game.worldMap.width),
-        y: Math.floor(Math.random() * game.worldMap.height),
-      };
-      if (blocked(game, now, candidate)) {
-        continue;
+    // Demo: humans spawn near a managed agent (Ada) if one exists
+    if (tokenIdentifier) {
+      for (const agent of game.world.agents.values()) {
+        const desc = game.agentDescriptions.get(agent.id);
+        if (desc?.type === 'managed') {
+          const agentPlayer = game.world.players.get(agent.playerId);
+          if (agentPlayer) {
+            // Try positions within 3 tiles of Ada
+            for (let dx = -3; dx <= 3 && !position; dx++) {
+              for (let dy = -3; dy <= 3 && !position; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const candidate = {
+                  x: Math.floor(agentPlayer.position.x) + dx,
+                  y: Math.floor(agentPlayer.position.y) + dy,
+                };
+                if (!blocked(game, now, candidate)) {
+                  position = candidate;
+                }
+              }
+            }
+          }
+          break;
+        }
       }
-      position = candidate;
-      break;
+    }
+    // Fallback: random position
+    if (!position) {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const candidate = {
+          x: Math.floor(Math.random() * game.worldMap.width),
+          y: Math.floor(Math.random() * game.worldMap.height),
+        };
+        if (blocked(game, now, candidate)) {
+          continue;
+        }
+        position = candidate;
+        break;
+      }
     }
     if (!position) {
       throw new Error(`Failed to find a free position!`);

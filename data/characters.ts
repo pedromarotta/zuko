@@ -117,5 +117,5 @@ export const characters = [
   },
 ];
 
-// Characters move at 4.0 tiles per second.
-export const movementSpeed = 4.0;
+// Characters move at 6.0 tiles per second (fast for demo).
+export const movementSpeed = 6.0;
